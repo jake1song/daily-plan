@@ -1,0 +1,133 @@
+name: Build and Deploy to Tencent COS
+
+on:
+  repository_dispatch:
+    types: [update_schedule]
+  workflow_dispatch:
+    inputs:
+      test_content:
+        description: "测试内容"
+        required: false
+        default: "☕️ 上午 (08:00-12:00)\n· 08:00 - 起床洗漱\n· 09:00-11:00 - 深度工作\n\n☀️ 下午 (12:00-18:00)\n· 12:00 - 午餐\n· 14:00-17:00 - 继续工作\n\n🌙 晚上 (18:00-23:00)\n· 19:00-20:00 - 健身\n· 22:30 - 准备入睡"
+      test_date:
+        description: "测试日期"
+        required: false
+        default: "2026-04-28"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install coscmd
+        run: pip install coscmd
+
+      - name: Set content from dispatch or manual trigger
+        id: parse
+        env:
+          PAYLOAD_CONTENT: ${{ toJSON(github.event.client_payload.content) }}
+          PAYLOAD_DATE: ${{ toJSON(github.event.client_payload.date) }}
+          MANUAL_CONTENT: ${{ toJSON(github.event.inputs.test_content) }}
+          MANUAL_DATE: ${{ toJSON(github.event.inputs.test_date) }}
+        run: |
+          python3 << 'PYEOF'
+          import json, os, textwrap
+
+          # Determine if manual trigger or dispatch
+          manual_content = os.environ.get('MANUAL_CONTENT', 'null')
+          if manual_content and manual_content != 'null' and manual_content != '""':
+              content = json.loads(manual_content)
+              date = json.loads(os.environ.get('MANUAL_DATE', '"2026-04-28"'))
+          else:
+              content = json.loads(os.environ.get('PAYLOAD_CONTENT', '""'))
+              date = json.loads(os.environ.get('PAYLOAD_DATE', '""'))
+
+          if not content or content == "":
+              content = "⏳ 今日安排尚未生成\n\n每天 07:00 AI 自动更新"
+          if not date or date == "":
+              from datetime import date as dt
+              date = dt.today().isoformat()
+
+          # Weekday in Chinese
+          import datetime
+          weekdays = ['一', '二', '三', '四', '五', '六', '日']
+          try:
+              dt_obj = datetime.datetime.strptime(date, '%Y-%m-%d')
+              weekday = weekdays[dt_obj.weekday()]
+              display_date = f"{date} 星期{weekday}"
+          except:
+              display_date = date
+
+          # Escape content for safe embedding in HTML
+          # Escape only what's needed: & < > "
+          escaped_content = content.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
+
+          # Build HTML
+          html = f'''<!DOCTYPE html>
+          <html lang="zh">
+          <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+          <meta name="apple-mobile-web-app-capable" content="yes">
+          <title>今日安排</title>
+          <style>
+          *{{margin:0;padding:0;box-sizing:border-box}}
+          body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f0f2f5;color:#1a1a2e;min-height:100vh;padding:16px;display:flex;align-items:flex-start;justify-content:center}}
+          .container{{max-width:480px;width:100%;margin:20px auto}}
+          .header{{background:linear-gradient(135deg,#667eea,#764ba2);border-radius:16px;padding:20px 24px;color:#fff;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center}}
+          .header h1{{font-size:18px;font-weight:600}}
+          .header .date{{font-size:13px;opacity:0.85;margin-top:4px}}
+          .header .badge{{background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:20px;font-size:12px}}
+          .card{{background:#fff;border-radius:16px;padding:24px;box-shadow:0 2px 12px rgba(0,0,0,0.06)}}
+          .content{{font-size:15px;line-height:1.9;color:#333;white-space:pre-wrap}}
+          .content strong{{color:#667eea}}
+          .empty{{text-align:center;padding:40px 20px;color:#999}}
+          .empty .icon{{font-size:48px;margin-bottom:12px}}
+          .empty p{{font-size:14px}}
+          .footer{{text-align:center;margin-top:16px;font-size:12px;color:#bbb;padding:12px}}
+          @media(prefers-color-scheme:dark){{body{{background:#1a1a2e;color:#e0e0e0}}.card{{background:#2a2a3e;color:#e0e0e0}}.content{{color:#d0d0e0}}.footer{{color:#666}}}}
+          </style>
+          </head>
+          <body>
+          <div class="container">
+            <div class="header">
+              <div>
+                <h1>📅 今日安排</h1>
+                <div class="date">{display_date}</div>
+              </div>
+              <span class="badge">{"✅ 已更新" if content != "⏳ 今日安排尚未生成\\n\\n每天 07:00 AI 自动更新" else "⏳ 待生成"}</span>
+            </div>
+            <div class="card">
+              <div class="content">{escaped_content}</div>
+            </div>
+            <div class="footer">✦ AI 自动生成 · 每日 07:00 更新 ✦</div>
+          </div>
+          </body>
+          </html>'''
+
+          # Clean up the triple-indented multi-line string
+          import textwrap
+          html = textwrap.dedent(html).strip()
+
+          with open('index.html', 'w', encoding='utf-8') as f:
+              f.write(html)
+
+          print(f"✅ index.html generated for {date}")
+          print(f"   Content length: {len(content)} chars")
+          PYEOF
+
+      - name: Deploy to Tencent COS
+        env:
+          TENCENT_SECRET_ID: ${{ secrets.TENCENT_SECRET_ID }}
+          TENCENT_SECRET_KEY: ${{ secrets.TENCENT_SECRET_KEY }}
+          BUCKET: ${{ secrets.BUCKET_NAME }}
+          REGION: ${{ secrets.TENCENT_REGION }}
+        run: |
+          coscmd -s $TENCENT_SECRET_ID -k $TENCENT_SECRET_KEY -b $BUCKET -r $REGION upload index.html /
+          echo "✅ 已上传到 COS 存储桶"
