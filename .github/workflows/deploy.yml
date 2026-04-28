@@ -18,10 +18,10 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -121,6 +121,26 @@ jobs:
           print(f"   Content length: {len(content)} chars")
           PYEOF
 
+      - name: Check secrets
+        id: check_secrets
+        env:
+          TENCENT_SECRET_ID: ${{ secrets.TENCENT_SECRET_ID }}
+          TENCENT_SECRET_KEY: ${{ secrets.TENCENT_SECRET_KEY }}
+          BUCKET: ${{ secrets.BUCKET_NAME }}
+          REGION: ${{ secrets.TENCENT_REGION }}
+        run: |
+          missing=""
+          [ -z "$TENCENT_SECRET_ID" ] && missing="$missing TENCENT_SECRET_ID"
+          [ -z "$TENCENT_SECRET_KEY" ] && missing="$missing TENCENT_SECRET_KEY"
+          [ -z "$BUCKET" ] && missing="$missing BUCKET_NAME"
+          [ -z "$REGION" ] && missing="$missing TENCENT_REGION"
+          if [ -n "$missing" ]; then
+            echo "❌ 错误: 以下 secrets 未在 GitHub 仓库中配置:$missing"
+            echo "   请在 https://github.com/jake1song/daily-plan/settings/secrets/actions 中配置"
+            exit 1
+          fi
+          echo "✅ 所有 secrets 已配置"
+
       - name: Deploy to Tencent COS
         env:
           TENCENT_SECRET_ID: ${{ secrets.TENCENT_SECRET_ID }}
@@ -128,6 +148,6 @@ jobs:
           BUCKET: ${{ secrets.BUCKET_NAME }}
           REGION: ${{ secrets.TENCENT_REGION }}
         run: |
-          coscmd config -a $TENCENT_SECRET_ID -s $TENCENT_SECRET_KEY -b $BUCKET -r $REGION -m 30
+          coscmd config -a "$TENCENT_SECRET_ID" -s "$TENCENT_SECRET_KEY" -b "$BUCKET" -r "$REGION" -m 30
           coscmd upload index.html /
           echo "✅ 已上传到 COS 存储桶"
