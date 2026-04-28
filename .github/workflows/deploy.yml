@@ -31,21 +31,28 @@ jobs:
       - name: Set content from dispatch or manual trigger
         id: parse
         env:
-          # 直接用原始字符串，避免 toJSON 吃掉 \n
           PAYLOAD_CONTENT: ${{ github.event.client_payload.content }}
           PAYLOAD_DATE: ${{ github.event.client_payload.date }}
           MANUAL_CONTENT: ${{ github.event.inputs.test_content }}
           MANUAL_DATE: ${{ github.event.inputs.test_date }}
         run: |
+          # Debug: print raw env var
+          echo "=== RAW MANUAL_CONTENT ==="
+          echo "$MANUAL_CONTENT"
+          echo "=== END ==="
+
           python3 << 'PYEOF'
           import json, os
           from datetime import date, datetime
+
+          # Debug: print the raw env var
+          raw = os.environ.get('MANUAL_CONTENT', '')
+          print(f"RAW len={len(raw)}, repr={repr(raw[:200])}")
 
           def read_input(key, fallback):
               val = os.environ.get(key, '')
               if not val or val == '':
                   return fallback
-              # Try JSON decode first (for repository_dispatch payloads)
               try:
                   return json.loads(val)
               except:
@@ -55,7 +62,6 @@ jobs:
           content = read_input('MANUAL_CONTENT', '')
           date_str = read_input('MANUAL_DATE', '')
 
-          # If no manual content, try dispatch payload
           if not content:
               content = read_input('PAYLOAD_CONTENT', '')
               date_str = read_input('PAYLOAD_DATE', '')
@@ -64,6 +70,9 @@ jobs:
               content = "⏳ 今日安排尚未生成\n\n每天 07:00 AI 自动更新"
           if not date_str:
               date_str = date.today().isoformat()
+
+          # Debug: check content
+          print(f"CONTENT len={len(content)}, has_newline={'\\n' in content}, repr={repr(content[:80])}")
 
           weekdays = ['一', '二', '三', '四', '五', '六', '日']
           try:
