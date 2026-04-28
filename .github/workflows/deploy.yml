@@ -111,8 +111,7 @@ jobs:
           </body>
           </html>'''
 
-          # Clean up the triple-indented multi-line string
-          import textwrap
+          # Clean up the multi-line string
           html = textwrap.dedent(html).strip()
 
           with open('index.html', 'w', encoding='utf-8') as f:
@@ -129,5 +128,6 @@ jobs:
           BUCKET: ${{ secrets.BUCKET_NAME }}
           REGION: ${{ secrets.TENCENT_REGION }}
         run: |
-          coscmd -s $TENCENT_SECRET_ID -k $TENCENT_SECRET_KEY -b $BUCKET -r $REGION upload index.html /
+          coscmd config -a $TENCENT_SECRET_ID -s $TENCENT_SECRET_KEY -b $BUCKET -r $REGION -m 30
+          coscmd upload index.html /
           echo "✅ 已上传到 COS 存储桶"
