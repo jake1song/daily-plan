@@ -28,35 +28,40 @@ jobs:
       - name: Install coscmd
         run: pip install coscmd
 
-      - name: Debug - check Python
-        run: |
-          which python3 || echo "python3 not found"
-          which python || echo "python not found"
-          python3 --version || python --version || echo "NO PYTHON"
-
       - name: Set content from dispatch or manual trigger
         id: parse
         env:
-          PAYLOAD_CONTENT: ${{ toJSON(github.event.client_payload.content) }}
-          PAYLOAD_DATE: ${{ toJSON(github.event.client_payload.date) }}
-          MANUAL_CONTENT: ${{ toJSON(github.event.inputs.test_content) }}
-          MANUAL_DATE: ${{ toJSON(github.event.inputs.test_date) }}
+          # 直接用原始字符串，避免 toJSON 吃掉 \n
+          PAYLOAD_CONTENT: ${{ github.event.client_payload.content }}
+          PAYLOAD_DATE: ${{ github.event.client_payload.date }}
+          MANUAL_CONTENT: ${{ github.event.inputs.test_content }}
+          MANUAL_DATE: ${{ github.event.inputs.test_date }}
         run: |
-          # Write Python script to temp file to avoid heredoc issues
-          cat > /tmp/gen_html.py << 'ENDSCRIPT'
+          python3 << 'PYEOF'
           import json, os
           from datetime import date, datetime
 
-          manual_content = os.environ.get('MANUAL_CONTENT', 'null')
-          if manual_content and manual_content != 'null' and manual_content != '""':
-              content = json.loads(manual_content)
-              date_str = json.loads(os.environ.get('MANUAL_DATE', '"2026-04-28"'))
-          else:
-              content = json.loads(os.environ.get('PAYLOAD_CONTENT', '""'))
-              date_str = json.loads(os.environ.get('PAYLOAD_DATE', '""'))
+          def read_input(key, fallback):
+              val = os.environ.get(key, '')
+              if not val or val == '':
+                  return fallback
+              # Try JSON decode first (for repository_dispatch payloads)
+              try:
+                  return json.loads(val)
+              except:
+                  return val
+
+          # Try manual trigger first
+          content = read_input('MANUAL_CONTENT', '')
+          date_str = read_input('MANUAL_DATE', '')
+
+          # If no manual content, try dispatch payload
+          if not content:
+              content = read_input('PAYLOAD_CONTENT', '')
+              date_str = read_input('PAYLOAD_DATE', '')
 
           if not content:
-              content = "今日安排尚未生成"
+              content = "⏳ 今日安排尚未生成\n\n每天 07:00 AI 自动更新"
           if not date_str:
               date_str = date.today().isoformat()
 
@@ -68,14 +73,12 @@ jobs:
               display = date_str
 
           escaped = content.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
-
-          updated_badge = "已更新" if content != "今日安排尚未生成" else "待生成"
+          badge = "✅ 已更新" if content != "⏳ 今日安排尚未生成\n\n每天 07:00 AI 自动更新" else "⏳ 待生成"
 
           html = f'''<!DOCTYPE html>
           <html lang="zh"><head>
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
-          <meta name="apple-mobile-web-app-capable" content="yes">
           <title>今日安排</title>
           <style>
           *{{margin:0;padding:0;box-sizing:border-box}}
@@ -84,30 +87,26 @@ jobs:
           .header{{background:linear-gradient(135deg,#667eea,#764ba2);border-radius:16px;padding:20px 24px;color:#fff;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center}}
           .header h1{{font-size:18px;font-weight:600}}
           .header .date{{font-size:13px;opacity:0.85;margin-top:4px}}
-          .header .badge{{background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:20px;font-size:12px}}
+          .header .badge{{background:rgba(255,255,255,0.2);border-radius:20px;padding:4px 12px;font-size:12px}}
           .card{{background:#fff;border-radius:16px;padding:24px;box-shadow:0 2px 12px rgba(0,0,0,0.06)}}
           .content{{font-size:15px;line-height:1.9;color:#333;white-space:pre-wrap}}
-          .content strong{{color:#667eea}}
-          .empty{{text-align:center;padding:40px 20px;color:#999}}
           .footer{{text-align:center;margin-top:16px;font-size:12px;color:#bbb;padding:12px}}
           @media(prefers-color-scheme:dark){{body{{background:#1a1a2e;color:#e0e0e0}}.card{{background:#2a2a3e;color:#e0e0e0}}.content{{color:#d0d0e0}}.footer{{color:#666}}}}
           </style></head><body>
           <div class="container">
             <div class="header">
-              <div><h1>今日安排</h1><div class="date">{display}</div></div>
-              <span class="badge">{updated_badge}</span>
+              <div><h1>📅 今日安排</h1><div class="date">{display}</div></div>
+              <span class="badge">{badge}</span>
             </div>
             <div class="card"><div class="content">{escaped}</div></div>
-            <div class="footer">AI 自动生成</div>
+            <div class="footer">✦ AI 自动生成 · 每日 07:00 更新 ✦</div>
           </div></body></html>'''
 
           with open('index.html', 'w', encoding='utf-8') as f:
               f.write(html)
 
-          print(f"index.html generated for {date_str}, {len(content)} chars")
-          ENDSCRIPT
-
-          python3 /tmp/gen_html.py || python /tmp/gen_html.py
+          print(f"✅ index.html generated for {date_str}, {len(content)} chars")
+          PYEOF
 
       - name: Check secrets
         id: check_secrets
