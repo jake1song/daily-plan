@@ -28,6 +28,12 @@ jobs:
       - name: Install coscmd
         run: pip install coscmd
 
+      - name: Debug - check Python
+        run: |
+          which python3 || echo "python3 not found"
+          which python || echo "python not found"
+          python3 --version || python --version || echo "NO PYTHON"
+
       - name: Set content from dispatch or manual trigger
         id: parse
         env:
@@ -36,42 +42,37 @@ jobs:
           MANUAL_CONTENT: ${{ toJSON(github.event.inputs.test_content) }}
           MANUAL_DATE: ${{ toJSON(github.event.inputs.test_date) }}
         run: |
-          python3 << 'PYEOF'
-          import json, os, textwrap
+          # Write Python script to temp file to avoid heredoc issues
+          cat > /tmp/gen_html.py << 'ENDSCRIPT'
+          import json, os
+          from datetime import date, datetime
 
-          # Determine if manual trigger or dispatch
           manual_content = os.environ.get('MANUAL_CONTENT', 'null')
           if manual_content and manual_content != 'null' and manual_content != '""':
               content = json.loads(manual_content)
-              date = json.loads(os.environ.get('MANUAL_DATE', '"2026-04-28"'))
+              date_str = json.loads(os.environ.get('MANUAL_DATE', '"2026-04-28"'))
           else:
               content = json.loads(os.environ.get('PAYLOAD_CONTENT', '""'))
-              date = json.loads(os.environ.get('PAYLOAD_DATE', '""'))
+              date_str = json.loads(os.environ.get('PAYLOAD_DATE', '""'))
 
-          if not content or content == "":
-              content = "⏳ 今日安排尚未生成\n\n每天 07:00 AI 自动更新"
-          if not date or date == "":
-              from datetime import date as dt
-              date = dt.today().isoformat()
+          if not content:
+              content = "今日安排尚未生成"
+          if not date_str:
+              date_str = date.today().isoformat()
 
-          # Weekday in Chinese
-          import datetime
           weekdays = ['一', '二', '三', '四', '五', '六', '日']
           try:
-              dt_obj = datetime.datetime.strptime(date, '%Y-%m-%d')
-              weekday = weekdays[dt_obj.weekday()]
-              display_date = f"{date} 星期{weekday}"
+              dt = datetime.strptime(date_str, '%Y-%m-%d')
+              display = f"{date_str} 星期{weekdays[dt.weekday()]}"
           except:
-              display_date = date
+              display = date_str
 
-          # Escape content for safe embedding in HTML
-          # Escape only what's needed: & < > "
-          escaped_content = content.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
+          escaped = content.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
 
-          # Build HTML
+          updated_badge = "已更新" if content != "今日安排尚未生成" else "待生成"
+
           html = f'''<!DOCTYPE html>
-          <html lang="zh">
-          <head>
+          <html lang="zh"><head>
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
           <meta name="apple-mobile-web-app-capable" content="yes">
@@ -88,38 +89,25 @@ jobs:
           .content{{font-size:15px;line-height:1.9;color:#333;white-space:pre-wrap}}
           .content strong{{color:#667eea}}
           .empty{{text-align:center;padding:40px 20px;color:#999}}
-          .empty .icon{{font-size:48px;margin-bottom:12px}}
-          .empty p{{font-size:14px}}
           .footer{{text-align:center;margin-top:16px;font-size:12px;color:#bbb;padding:12px}}
           @media(prefers-color-scheme:dark){{body{{background:#1a1a2e;color:#e0e0e0}}.card{{background:#2a2a3e;color:#e0e0e0}}.content{{color:#d0d0e0}}.footer{{color:#666}}}}
-          </style>
-          </head>
-          <body>
+          </style></head><body>
           <div class="container">
             <div class="header">
-              <div>
-                <h1>📅 今日安排</h1>
-                <div class="date">{display_date}</div>
-              </div>
-              <span class="badge">{"✅ 已更新" if content != "⏳ 今日安排尚未生成\\n\\n每天 07:00 AI 自动更新" else "⏳ 待生成"}</span>
+              <div><h1>今日安排</h1><div class="date">{display}</div></div>
+              <span class="badge">{updated_badge}</span>
             </div>
-            <div class="card">
-              <div class="content">{escaped_content}</div>
-            </div>
-            <div class="footer">✦ AI 自动生成 · 每日 07:00 更新 ✦</div>
-          </div>
-          </body>
-          </html>'''
-
-          # Clean up the multi-line string
-          html = textwrap.dedent(html).strip()
+            <div class="card"><div class="content">{escaped}</div></div>
+            <div class="footer">AI 自动生成</div>
+          </div></body></html>'''
 
           with open('index.html', 'w', encoding='utf-8') as f:
               f.write(html)
 
-          print(f"✅ index.html generated for {date}")
-          print(f"   Content length: {len(content)} chars")
-          PYEOF
+          print(f"index.html generated for {date_str}, {len(content)} chars")
+          ENDSCRIPT
+
+          python3 /tmp/gen_html.py || python /tmp/gen_html.py
 
       - name: Check secrets
         id: check_secrets
